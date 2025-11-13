@@ -1,0 +1,929 @@
+---
+title: "Techno-Optimism Analyses"
+author: Fabian Dablander
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+header-includes:
+   - "\\usepackage{booktabs}"
+output:
+  html_document:
+    toc: true
+    theme: united
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, warning = FALSE, message = FALSE, eval = TRUE, cache = FALSE,
+  fig.align = 'center', fig.width = 10, fig.height = 12, dpi = 300,
+  out.width='100%', out.height='100%'
+)
+```
+
+<!-- avoid border around images -->
+<style>
+    img {
+        border: 0;
+    }
+</style>
+
+
+# Setup
+This document runs the statistical analyses reported in the paper Dablander, F., Cologna, V., Sachisthal, M.S.M., & Haslbeck, J.M.B. (2025). Techno-optimistic scientists take fewer climate actions.
+
+```{r}
+library(brms)
+library(knitr)
+library(dplyr)
+library(scales)
+library(ggplot2)
+library(tidyverse)
+library(gridExtra)
+library(doParallel)
+library(kableExtra)
+library(RColorBrewer)
+library(marginaleffects)
+options(brms.backend = 'cmdstanr')
+source('helpers.R')
+```
+
+# Data preparation
+We load the data and create variables and categorizations that are useful for the subsequent analyses.
+
+```{r}
+dat_final <- readRDS('data/DataS3_Final.RDS') %>% 
+  mutate(
+    engaged_protest = as.numeric(BehLegal == 2),
+    engaged_advocacy = as.numeric(Beh_EngPub == 2),
+    research_fact = factor(
+      Research_std,
+      labels = c("Not at all", "Very little", "A moderate amount", "Quite a bit", "A great deal")
+    )
+  )
+
+dat_num <- readRDS('data/DataS1_Anonymized.RDS') %>% 
+  mutate(
+    # Natural science as reference category
+    humanities = as.numeric(
+      Field == 1 | open_field == "Humanities (e.g., History, Languages, Law)"
+    ),
+    social_science = as.numeric(
+      Field == 2 | open_field == "Social and behavioral sciences (e.g., Economics, Sociology, Psychology)"
+    ),
+    natural_science = as.numeric(
+      Field == 3 | open_field == 'Natural sciences (e.g., Biology, Chemistry, Earth sciences)'
+    ),
+    formal_science = as.numeric(
+      Field == 4 | open_field == "Formal sciences (e.g., Computer science, Logic, Mathematics)"
+    ),
+    applied_science = as.numeric(
+      Field == 5 | open_field == "Professions and applied sciences (e.g., Agriculture, Engineering)"
+    ),
+    medical_science = as.numeric(open_field == "Medical sciences"),
+    other_science = as.numeric(open_field == "Other, please specify:"),
+    
+    fieldname = case_when(
+      humanities == 1 ~ 'Humanities',
+      social_science == 1 ~ 'Social and behavioral sciences',
+      formal_science == 1 ~ 'Formal sciences',
+      applied_science == 1 ~ 'Professions and applied sciences',
+      medical_science == 1 ~ 'Medical sciences',
+      other_science == 1 ~ 'Other',
+      natural_science == 1 ~ 'Natural sciences',
+      TRUE ~ NA_character_
+      # TRUE ~ 'Natural sciences'
+    ),
+    
+    position_name = case_when(
+      Position == 1 ~ 'PhD candidate',
+      Position == 2 ~ 'Postdoc',
+      Position == 3 ~ 'Assisstant professor',
+      Position == 4 ~ 'Associate professor',
+      Position == 5 ~ 'Full professor',
+      is.na(Position) ~ NA_character_,
+      TRUE ~ 'Other'
+    ),
+    
+    position_name_full = case_when(
+      Position == 1 ~ 'PhD candidate',
+      Position == 2 ~ 'Postdoc',
+      Position == 3 ~ 'Assisstant professor',
+      Position == 4 ~ 'Associate professor',
+      Position == 5 ~ 'Full professor',
+      Position == 7 ~ 'Scientist or researcher in industry',
+      Position == 8 ~ 'Scientist or researcher at a public research institute',
+      Position == 9 ~ 'Scientist or researcher at a non-profit organization',
+      Position == 10 ~ 'Other',
+      TRUE ~ NA_character_
+    ),
+    
+    reduced_car = as.numeric(Beh_incNotApp_1 == 2),
+    electric_vehicle = as.numeric(Beh_incNotApp_2 == 2),
+    energy_home = as.numeric(Beh_incNotApp_3 == 2),
+    fewer_children = as.numeric(Beh_incNotApp_4 == 2),
+    talk_climate = as.numeric(Beh_incNotApp_5 == 2),
+    donate_money = as.numeric(Beh_incNotApp_6 == 2),
+    veggie_diet = as.numeric(Beh_incNotApp_7 == 2),
+    reduced_flying = as.numeric(Beh_incNotApp_8 == 2),
+    
+    signed_petitions = as.numeric(Beh_others_1 == 2),
+    advocated_change = as.numeric(Beh_others_2 == 2),
+    engaged_policymakers = as.numeric(Beh_others_3 == 2),
+    wrote_letters = as.numeric(Beh_others_4 == 2),
+    engaged_disobedience = as.numeric(Beh_others_7 == 2),
+    engaged_protest = as.numeric(BehLegal == 2),
+    engaged_advocacy = as.numeric(Beh_EngPub == 2)
+  )
+    
+dat_final$position <- factor(
+  dat_num$position_name,
+  levels = c(
+    'Full professor', 'Associate professor', 'Assisstant professor',
+    'Postdoc', 'PhD candidate', 'Other'
+  )
+)
+
+dat_final$political = factor(
+  dat_final$Political_std, labels = c('1 (Left)', '2', '3', '4', '5', '6', '7 (Right)')
+)
+
+dat_final$fieldname <- dat_num$fieldname
+dat_final$field <- factor(
+  dat_num$fieldname,
+  levels = c(
+    'Natural sciences', 'Social and behavioral sciences', 'Medical sciences',
+    'Formal sciences', 'Humanities', 'Professions and applied sciences', 'Other'
+  )
+)
+
+dat_final <- dat_final %>% 
+  mutate(
+    techno_optimism = factor(
+      ToC1_2_std,
+      labels = c('Strongly disagree', 'Disagree', 'Neutral', 'Agree', 'Strongly agree')
+    ),
+    
+    techno_optimism_trin = factor(
+      ifelse(
+        techno_optimism %in% c('Strongly disagree', 'Disagree'), 'Disagree',
+        ifelse(techno_optimism == 'Neutral', 'Neutral', 'Agree')
+      ),
+      levels = c('Disagree', 'Neutral', 'Agree')
+    ),
+    
+    informed = factor(
+      Informed_std, labels = c('Not at all', 'Very little', 'A moderate amount', 'Quite a bit', 'A great deal')
+    )
+)
+
+# There are 87 missing responses for continent, code them as 'not specified'
+dat_final$continent <- ifelse(is.na(dat_num$Continent), 'not specified', dat_num$Continent)
+
+dat_climate <- dat_final %>% 
+  mutate(
+    climate_researcher = as.numeric(research_fact == 'A great deal')
+  ) %>% 
+  filter(research_fact %in% c('Not at all', 'A great deal'))
+
+behaviors <- list(
+  # Civic behaviors
+  'talk_climate' = 'Talked about climate with others',
+  'donate_money' = 'Donated to climate organizations',
+  'signed_petitions' = 'Signed petitions',
+  'advocated_change' = 'Advocated change within institution',
+  'engaged_policymakers' = 'Engaged with politicians',
+  'engaged_disobedience' = 'Engaged in civil disobedience',
+  'engaged_protest' = 'Engaged in protest',
+  'engaged_advocacy' = 'Engaged in advocacy',
+  'wrote_letters' = 'Wrote letters to politicians',
+  
+  # Lifestyle behaviors
+  'reduced_flying' = 'Reduced flying',
+  'reduced_car' = 'Reduced car usage',
+  'electric_vehicle' = 'Switched to electric vehicle',
+  'energy_home' = 'Switched to renewable energy at home',
+  'veggie_diet' = 'Follows a mostly vegetarian or vegan diet',
+  'fewer_children' = 'Decided to have fewer or no children'
+)
+
+behavior_map <- list(
+  'Civic action' = unlist(behaviors[seq(9)]),
+  'Lifestyle change' = unlist(behaviors[seq(10, 15)])
+)
+behavior_names_map <- unlist(behaviors)
+```
+
+We lose 21 cases (0.2%) that have NA in either `Position` or `Field`.
+
+```{r}
+nrow(dat_final) - nrow(drop_na(dat_final, position, field))
+dat_final <- drop_na(dat_final, position, field)
+```
+
+## Figure 2: Techno-optimism across research, scientific field, political orientation
+We show the model-implied percentages of the techno-optimism variable, as well as the model-implied percentage of techno-optimistic scientists across research related to climate change, scientific field, and political orientation.
+
+```{r}
+fill_col <- 'gray56'
+
+form <- paste0(
+  'techno_optimism ~ ',
+  'research_fact + informed + Age_std + political + position + field + ',
+  'continent + is_tenured + is_female + is_gender_other'
+)
+
+filename <- 'models/techno_optimism.RDS'
+
+dat_final$techno_optimism <- as.ordered(dat_final$techno_optimism)
+fit <- run_model(
+  form, filename, dat_final, use_model = NULL,
+  cores = 4, chains = 4, family = cumulative('probit'), iter = 2000, warmup = 500
+)
+
+
+if (!file.exists('results/techno_pred.RDS')) {
+  dat_techno_pred <- avg_predictions(fit)
+  saveRDS(dat_techno_pred, 'results/techno_pred.RDS')
+} else {
+  dat_techno_pred <- data.frame(readRDS('results/techno_pred.RDS'))
+}
+
+if (!file.exists('results/research_pred.RDS')) {
+  dat_research_pred <- avg_predictions(fit, variable = 'research_fact')
+  saveRDS(dat_research_pred, 'results/research_pred.RDS')
+} else {
+  dat_research_pred <- readRDS('results/research_pred.RDS')
+}
+
+df_draws <- get_draws(dat_research_pred)
+
+df_research_combined <- df_draws %>%
+  filter(group %in% c('Strongly agree', 'Agree')) %>%
+  # For each draw and political orientation
+  group_by(drawid, research_fact) %>%
+  # Sum the predicted probabilities across Strongly agree and Agree
+  summarise(draw = sum(draw), .groups = "drop") %>%
+  group_by(research_fact) %>%
+  summarise(
+    estimate = mean(draw),
+    ci_lo = quantile(draw, 0.025),
+    ci_hi = quantile(draw, 0.975),
+    .groups = 'drop'
+  )
+
+if (!file.exists('results/political_pred.RDS')) {
+  dat_political_pred <- avg_predictions(fit, variable = 'political')
+  saveRDS(dat_political_pred, 'results/political_pred.RDS')
+} else {
+  dat_political_pred <- readRDS('results/political_pred.RDS')
+}
+
+df_draws <- get_draws(dat_political_pred)
+
+df_political_combined <- df_draws %>%
+  filter(group %in% c('Strongly agree', 'Agree')) %>%
+  # For each draw and political orientation
+  group_by(drawid, political) %>%
+  # Sum the predicted probabilities across Strongly agree and Agree
+  summarise(draw = sum(draw), .groups = "drop") %>%
+  group_by(political) %>%
+  summarise(
+    estimate = mean(draw),
+    ci_lo = quantile(draw, 0.025),
+    ci_hi = quantile(draw, 0.975),
+    .groups = 'drop'
+  )
+
+if (!file.exists('results/field_pred.RDS')) {
+  dat_field_pred <- avg_predictions(fit, variable = 'field')
+  saveRDS(dat_field_pred, 'results/field_pred.RDS')
+} else {
+  dat_field_pred <- readRDS('results/field_pred.RDS')
+}
+
+df_draws <- get_draws(dat_field_pred)
+
+df_field_combined <- df_draws %>%
+  filter(group %in% c('Strongly agree', 'Agree')) %>%
+  # For each draw and scientific field
+  group_by(drawid, field) %>%
+  # Sum the predicted probabilities across Strongly agree and Agree
+  summarise(draw = sum(draw), .groups = "drop") %>%
+  group_by(field) %>%
+  summarise(
+    estimate = mean(draw),
+    ci_lo = quantile(draw, 0.025),
+    ci_hi = quantile(draw, 0.975),
+    .groups = 'drop'
+  ) %>% 
+  mutate(
+    field = as.character(field),
+    field = case_when(
+      field == 'Social and behavioral sciences' ~ 'Social & \n behavioral \n sciences',
+      field == 'Professions and applied sciences' ~ 'Professions & \n applied \n sciences',
+      field == 'Formal sciences' ~ 'Formal \n sciences',
+      field == 'Natural sciences' ~ 'Natural \n sciences',
+      field == 'Medical sciences' ~ 'Medical \n sciences',
+      TRUE ~ field
+    ),
+    field = fct_reorder(field, estimate)
+  )
+
+ptechno <- ggplot(dat_techno_pred, aes(x = group, y = estimate)) +
+  geom_bar(stat = 'identity', fill = fill_col, color = 'black') +
+  geom_point(
+    size = 3, show.legend = FALSE, color = 'black'
+  ) +
+  geom_errorbar(
+    aes(ymin = conf.low, ymax = conf.high),
+    width = 0.30, linewidth = 1, show.legend = FALSE, color = 'black'
+  ) +
+  theme_minimal() +
+  ylab('Percentage of scientists') +
+  xlab('') +
+  ggtitle('Techno-optimism') +
+  scale_y_continuous(
+    breaks = seq(0, 0.4, 0.10), limits = c(0, 0.40), labels = label_percent(scale = 100)
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.50, size = 18),
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title.y = element_text(size = 14),
+    panel.grid.minor.y = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_blank()
+  )
+
+presearch <- ggplot(df_research_combined, aes(x = research_fact, y = estimate)) +
+  geom_bar(stat = 'identity', fill = fill_col, color = 'black') +
+  geom_point(
+    size = 3, show.legend = FALSE, color = 'black'
+  ) +
+  geom_errorbar(
+    aes(ymin = ci_lo, ymax = ci_hi),
+    width = 0.30, linewidth = 1, show.legend = FALSE, color = 'black'
+  ) +
+  theme_minimal() +
+  ylab('') +
+  xlab('') +
+  ggtitle('Research related to climate change') +
+  ylab('Percentage techno-optimistics') +
+  scale_y_continuous(
+    breaks = seq(0, 0.4, 0.10), limits = c(0, 0.40), labels = label_percent(scale = 100)
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.50, size = 18),
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title.y = element_text(size = 14),
+    panel.grid.minor.y = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_blank()
+  )
+
+pfield <- ggplot(df_field_combined, aes(x = field, y = estimate)) +
+  geom_bar(stat = 'identity', fill = fill_col, color = 'black') +
+  geom_point(
+    size = 3, show.legend = FALSE, color = 'black'
+  ) +
+  geom_errorbar(
+    aes(ymin = ci_lo, ymax = ci_hi),
+    width = 0.30, linewidth = 1, show.legend = FALSE, color = 'black'
+  ) +
+  theme_minimal() +
+  ylab('Percentage techno-optimistics') +
+  xlab('') +
+  ggtitle('Scientific field') +
+  scale_y_continuous(
+    breaks = seq(0, 0.4, 0.10), limits = c(0, 0.40), labels = label_percent(scale = 100)
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.50, size = 18),
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title.y = element_text(size = 14),
+    panel.grid.minor.y = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_blank()
+  )
+
+ppolitical <- ggplot(df_political_combined, aes(x = political, y = estimate)) +
+  geom_bar(stat = 'identity', fill = fill_col, color = 'black') +
+  geom_point(
+    size = 3, show.legend = FALSE, color = 'black'
+  ) +
+  geom_errorbar(
+    aes(ymin = ci_lo, ymax = ci_hi),
+    width = 0.30, linewidth = 1, show.legend = FALSE, color = 'black'
+  ) +
+  theme_minimal() +
+  ylab('') +
+  xlab('') +
+  ggtitle('Political orientation') +
+  scale_y_continuous(
+    breaks = seq(0, 0.7, 0.10), limits = c(0, 0.70), labels = label_percent(scale = 100)
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.50, size = 18),
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title.y = element_text(size = 14),
+    panel.grid.minor.y = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_blank()
+  )
+
+pdf('figures/Figure2.pdf', width = 14, height = 10)
+grid.arrange(
+  ptechno, presearch, pfield, ppolitical
+)
+dev.off()
+```
+
+## Figure 3: Techno-optimism and climate action
+We show the model-implied percentages of engagement in civic action and lifestyle changes by techno-optimistic and non-techno-optimistic scientists, adjusting for potential confounders.
+
+```{r}
+all_models <- run_all_models(
+  dat_final, predictor = 'techno_optimism',
+  filename_ext = '', force = FALSE
+)
+
+df_effects <- estimate_effects(
+  all_models, filename = 'results/effects.csv',
+  predictor = 'techno_optimism',
+  force = FALSE
+)
+df_effects$behavior <- unlist(behaviors[df_effects$behavior])
+df_effects <- order_effects(df_effects) %>% filter(class == 'adjusted')
+```
+
+We estimate the average (adjusted) difference between techno-optimistic and non-techno-optimistic scientists for civic actions (9\%) and lifestyle changes (10\%).
+
+```{r}
+df_effects %>% 
+  group_by(class, category) %>% 
+  summarize(
+    mean_estimate = mean(estimate[combined == 'Disagree'] - estimate[combined == 'Agree'])
+  )
+```
+
+```{r}
+cols <- c('#c44e52', '#4c72b0')
+p <- ggplot(
+  df_effects %>% filter(class == 'adjusted'),
+  aes(x = behavior, y = estimate, group = combined, color = combined)) +
+  geom_bar(
+    stat = 'identity', position = position_dodge(width = 0.8),
+    width = 0.70, aes(fill = combined)
+  ) +
+  geom_point(
+    aes(x = behavior, y = estimate), position = position_dodge(width = 0.80),
+    size = 2, show.legend = FALSE, color = 'black'
+  ) +
+  geom_errorbar(
+    aes(ymin = ci_lo, ymax = ci_hi), position = position_dodge(width = 0.80),
+    width = 0.40, linewidth = 1, show.legend = FALSE, color = 'black'
+  ) +
+  geom_point(
+    aes(x = behavior, y = estimate), position = position_dodge(width = 0.80),
+    size = 1, show.legend = FALSE
+  ) +
+  geom_errorbar(
+    aes(ymin = ci_lo, ymax = ci_hi), position = position_dodge(width = 0.80),
+    width = 0.30, linewidth = 0.30,
+    show.legend = FALSE
+  ) +
+  theme_minimal() +
+  coord_flip() +
+  xlab('') +
+  ylab('Percent reported engaging') +
+  scale_x_discrete(guide = guide_axis(angle = 0)) +
+  scale_color_manual(values = cols) +
+  scale_fill_manual(
+    values = cols,
+    labels = c('Agree with techno-optimism (n = 2,531)', 'Disagree with techno-optimism (n = 4,006)')
+  ) +
+  scale_y_continuous(
+    labels = label_percent(scale = 100), limits = c(0, 0.85), breaks = seq(0, 1, 0.10)
+  ) + 
+  ggtitle('Climate actions across techno-optimism beliefs') +
+  theme(
+    legend.position = 'top',
+    legend.title = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_blank(),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    axis.text.x = element_text(size = 10),
+    axis.text.y = element_text(size = 10),
+    plot.title = element_text(hjust = .5, size = 14),
+    strip.text.x = element_text(size = 9, face = 'bold')
+  ) + guides(fill = guide_legend(reverse = TRUE, ncol = 1), color = FALSE)
+
+p
+ggsave('figures/Figure3.pdf', p, width = 8, height = 10)
+```
+
+# Supplementary analyses
+## Table S1 & S2: Descriptive statistics
+Here we show descriptive statistics of a number of background variables.
+
+```{r}
+age_labels <- c(
+  'Under 18', '18 - 24 years', '25-34 years',
+  '35-44 years', '45-54 years', '55-64 years', '65+ years'
+)
+gender_labels <- c('Male', 'Female', 'Non-binary', 'Prefer to self-describe', 'Prefer not to say')
+field_labels <- c(
+  'Social and behavioral sciences', 'Natural sciences', 'Medical sciences',
+  'Professions and applied sciences', 'Formal sciences', 'Humanities', 'Other'
+)
+position_labels <- c(
+  'PhD candidate', 'Postdoc', 'Assisstant professor',
+  'Associate professor', 'Full professor',
+  'Scientist or researcher in industry',
+  'Scientist or researcher at a public research institute',
+  'Scientist or researcher at a non-profit organization',
+  'Other'
+)
+political_labels <- c('1', '2', '3', '4', '5', '6', '7')
+tenured_labels <- c('No', 'Yes')
+climate_labels <- c('Not at all', 'Very little', 'A moderate amount', 'Quite a bit', 'A great deal')
+techno_labels <- c('Strongly disagree', 'Disagree', 'Neutral', 'Agree', 'Strongly agree')
+continent_labels <- c('Europe', 'North America', 'South America', 'Asia', 'Africa', 'Oceania')
+informed_labels <- c('Not at all', 'Very little', 'A moderate amount', 'Quite a bit', 'A great deal')
+
+dat_descr <- dat_num %>% 
+  mutate(
+    Age = factor(Age, labels = age_labels),
+    Gender = factor(Gender, labels = gender_labels),
+    fieldname = factor(fieldname, levels = field_labels),
+    Position = factor(position_name_full, labels = position_labels),
+    Political = factor(Political, labels = political_labels),
+    Techno = factor(ToC1_2, labels = techno_labels),
+    Research = factor(Research, labels = informed_labels),
+    Informed = factor(Informed, labels = informed_labels)
+  )
+
+dat_age <- dat_descr %>% 
+  group_by(Age) %>% 
+  summarize(n_age = n()) %>% 
+  mutate(prop_age = 100 * round(n_age / sum(n_age), 2)) %>% 
+  mutate(final_age = paste0(n_age, ' (', prop_age, '%)')) %>% 
+  select(Age, final_age)
+
+dat_gender <- dat_descr %>% 
+  group_by(Gender) %>% 
+  summarize(n_gender = n()) %>% 
+  mutate(prop_gender = 100 * round(n_gender / sum(n_gender), 2)) %>% 
+  mutate(final_gender = paste0(n_gender, ' (', prop_gender, '%)')) %>% 
+  select(Gender, final_gender)
+
+dat_cont <- dat_descr %>% 
+  group_by(Continent) %>% 
+  summarize(n_cont = n()) %>% 
+  mutate(prop_cont = 100 * round(n_cont / sum(n_cont), 2)) %>% 
+  mutate(final_cont = paste0(n_cont, ' (', prop_cont, '%)')) %>% 
+  select(Continent, final_cont)
+
+dat_field <- dat_descr %>% 
+  select(-Field) %>% 
+  rename(Field = fieldname) %>% 
+  group_by(Field) %>% 
+  summarize(n_field = n()) %>% 
+  mutate(prop_field = 100 * round(n_field / sum(n_field), 2)) %>% 
+  mutate(final_field = paste0(n_field, ' (', prop_field, '%)')) %>% 
+  select(Field, final_field)
+
+dat_pos <- dat_descr %>% 
+  group_by(Position) %>% 
+  summarize(n_pos = n()) %>% 
+  mutate(prop_pos = 100 * round(n_pos / sum(n_pos), 2)) %>% 
+  mutate(final_pos = paste0(n_pos, ' (', prop_pos, '%)')) %>% 
+  select(Position, final_pos)
+
+dat_techno <- dat_descr %>% 
+  group_by(Techno) %>% 
+  summarize(n = n()) %>% 
+  mutate(prop = 100 * round(n / sum(n), 2)) %>% 
+  mutate(final_techno = paste0(n, ' (', prop, '%)')) %>% 
+  select(Techno, final_techno)
+
+dat_pol <- dat_descr %>% 
+  group_by(Political) %>% 
+  summarize(n_pol = n()) %>% 
+  mutate(prop_pol = 100 * round(n_pol / sum(n_pol), 2)) %>% 
+  mutate(final_pol = paste0(n_pol, ' (', prop_pol, '%)')) %>% 
+  select(Political, final_pol)
+
+dat_inf <- dat_descr %>% 
+  group_by(Informed) %>% 
+  summarize(n_inf = n()) %>% 
+  mutate(prop_inf = 100 * round(n_inf / sum(n_inf), 2)) %>% 
+  mutate(final_inf = paste0(n_inf, ' (', prop_inf, '%)')) %>% 
+  select(Informed, final_inf)
+
+dat_res <- dat_descr %>% 
+  group_by(Research) %>% 
+  summarize(n = n()) %>% 
+  mutate(prop = 100 * round(n / sum(n), 2)) %>% 
+  mutate(final_res = paste0(n, ' (', prop, '%)')) %>% 
+  select(Research, final_res)
+
+prep <- function(df, value) {
+  varname <- colnames(df)[1]
+  df$Variable <- varname
+  colnames(df) <- c('Variable', 'Frequency', 'Variablename')
+  df %>% 
+    select(Variablename, Variable, Frequency)
+}
+
+# Background / socio-demographics
+df_ses <- bind_rows(
+  prep(dat_age, 'final_age'),
+  prep(dat_gender, 'final_gender'),
+  prep(dat_cont, 'final_cont'),
+  prep(dat_field, 'final_field'),
+  prep(dat_pos, 'final_pos')
+)
+  
+df_info <- bind_rows(
+  prep(dat_techno, 'final_techno'),
+  prep(dat_pol, 'final_pol'),
+  prep(dat_inf, 'final_inf'),
+  prep(dat_res, 'final_res')
+)
+
+kable_ses <- kable(df_ses, booktabs = TRUE)
+print(kable_ses)
+```
+
+```{r}
+kable_info <- kable(df_info, booktabs = TRUE)
+print(kable_info)
+```
+
+
+## Supplementary Figure 1: Relationship with worry
+We estimate the percentage of techno-optimistic scientists across levels of worry.
+
+```{r, fig.width = 10, fig.height = 4}
+dat_final$worry <- factor(
+  dat_final$Worry_std,
+  labels = c('Not at all', 'Very little', 'A moderate amount', 'Quite a bit', 'A great deal')
+)
+
+form <- paste0(
+  'techno_optimism ~ ',
+  'research_fact + informed + worry + Age_std + political + ',
+  'position + field + continent + is_tenured + is_female + is_gender_other'
+)
+
+filename <- 'models/techno_optimism_worry.RDS'
+
+fit <- run_model(
+  form, filename, dat_final, use_model = NULL,
+  cores = 4, chains = 4, family = cumulative('probit'), iter = 2000, warmup = 500
+)
+
+
+if (!file.exists('results/worry_pred.RDS')) {
+  dat_worry_pred <- avg_predictions(fit, variables = 'worry')
+  saveRDS(dat_worry_pred, 'results/worry_pred.RDS')
+} else {
+  dat_worry_pred <- readRDS('results/worry_pred.RDS')
+}
+
+df_draws <- get_draws(dat_worry_pred)
+
+df_worry_combined <- df_draws %>%
+  filter(group %in% c('Strongly agree', 'Agree')) %>%
+  # For each draw and political orientation
+  group_by(drawid, worry) %>%
+  # Sum the predicted probabilities across Strongly agree and Agree
+  summarise(draw = sum(draw), .groups = "drop") %>%
+  group_by(worry) %>%
+  summarise(
+    estimate = mean(draw),
+    ci_lo = quantile(draw, 0.025),
+    ci_hi = quantile(draw, 0.975),
+    .groups = 'drop'
+  )
+
+
+if (!file.exists('results/informed_pred.RDS')) {
+  dat_informed_pred <- avg_predictions(fit, variables = 'informed')
+  saveRDS(dat_informed_pred, 'results/informed_pred.RDS')
+} else {
+  dat_informed_pred <- readRDS('results/informed_pred.RDS')
+}
+
+df_draws <- get_draws(dat_informed_pred)
+
+df_informed_combined <- df_draws %>%
+  filter(group %in% c('Strongly agree', 'Agree')) %>%
+  # For each draw and political orientation
+  group_by(drawid, informed) %>%
+  # Sum the predicted probabilities across Strongly agree and Agree
+  summarise(draw = sum(draw), .groups = "drop") %>%
+  group_by(informed) %>%
+  summarise(
+    estimate = mean(draw),
+    ci_lo = quantile(draw, 0.025),
+    ci_hi = quantile(draw, 0.975),
+    .groups = 'drop'
+  )
+
+pworry <- ggplot(df_worry_combined, aes(x = worry, y = estimate)) +
+  geom_bar(stat = 'identity', fill = fill_col, color = 'black') +
+  geom_point(
+    size = 3, show.legend = FALSE, color = 'black'
+  ) +
+  geom_errorbar(
+    aes(ymin = ci_lo, ymax = ci_hi),
+    width = 0.30, linewidth = 1, show.legend = FALSE, color = 'black'
+  ) +
+  theme_minimal() +
+  ylab('Percentage techno-optimistics') +
+  xlab('') +
+  ggtitle('Percentage techno-optimistics across levels of worry') +
+  scale_y_continuous(
+    breaks = seq(0, 0.7, 0.10), limits = c(0, 0.70), labels = label_percent(scale = 100)
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.50, size = 18),
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title.y = element_text(size = 14),
+    panel.grid.minor.y = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_blank()
+  )
+
+pworry
+ggsave('figures/FigureS1.pdf', pworry, width = 8, height = 6)
+```
+
+## Supplementary Figure 2: Relative differences
+We estimate the relative decrease in climate action by techno-optimistic scientists compared to non-techno-optimistic scientists.
+
+```{r}
+all_models <- run_all_models(dat_final, predictor = 'techno_optimism', filename_ext = '')
+
+df_effects_mult <- estimate_effects(
+  all_models, filename = 'results/effects_relative.csv',
+  predictor = 'techno_optimism',
+  force = FALSE, comp = 'multiplicative'
+)
+
+df_effects_mult$estimate <- 1 / df_effects_mult$estimate
+df_effects_mult$ci_lo <- 1 / df_effects_mult$ci_lo
+df_effects_mult$ci_hi <- 1 / df_effects_mult$ci_hi
+
+df_effects_mult$behavior <- unlist(behaviors[df_effects_mult$behavior])
+df_effects_mult <- order_effects(df_effects_mult, type = 'multiplicative') %>% 
+  mutate(
+    class = factor(class, rev(c('adjusted', 'unadjusted')))
+  )
+```
+
+The average (adjusted) relative decrease for techno-optimistic scientists is 28\% for civic actions and 20\% for lifestyle changes. The other way around, this corresponds to a average (adjusted) relative increase for non-techno-optimistic scientists for civic actions of 41\% and lifestyle changes of 26\%.
+
+```{r}
+df_effects_mult %>% 
+  group_by(class, category) %>% 
+  summarize(
+    mean_estimate = mean(estimate)
+  )
+```
+
+```{r}
+cols <- c('#D95F02', '#1B9E77')
+pS1 <- ggplot(
+  df_effects_mult,
+  aes(x = behavior, y = estimate, color = category, alpha = class)) +
+  geom_errorbar(
+    aes(ymin = ci_lo, ymax = ci_hi), position = position_dodge(width = 0.75),
+    width = 0.75, linewidth = 1,
+    show.legend = TRUE
+  ) +
+  geom_point(
+    aes(x = behavior, y = estimate), position = position_dodge(width = 0.75),
+    size = 3, show.legend = TRUE
+  ) +
+  theme_minimal() +
+  coord_flip() +
+  xlab('') +
+  ylab('Relative engagement') +
+  ggtitle('Relative engagement in climate action for \n techno-optimistics vs non-techno-optimistics') +
+  scale_x_discrete(guide = guide_axis(angle = 0)) +
+  scale_color_manual(values = cols) +
+  scale_alpha_manual(
+    values = c(0.50, 1),
+    labels = rev(c('Adjusted for background variables', 'Not adjusted'))
+  ) +
+  scale_y_continuous(
+    limits = c(0.20, 1.1),
+    breaks = seq(0.30, 1.0, 0.1),
+    labels = label_percent(scale = 100)
+    # breaks = c(1, 1.2, 1.4, 1.6, 1.8, 2, 2.2, 2.6, 3, 3.8),
+  ) +  # scale = 1 for proportions
+  theme(
+    legend.position = 'top',
+    legend.title = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_blank(),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    axis.text.x = element_text(size = 10),
+    axis.text.y = element_text(size = 10),
+    plot.title = element_text(hjust = .5, size = 14),
+    strip.text.x = element_text(size = 9, face = 'bold')
+  ) + guides(fill = guide_legend(reverse = TRUE, ncol = 1), color = FALSE)
+
+pS1
+ggsave('figures/FigureS2.pdf', pS1, width = 8, height = 10)
+```
+
+## Supplementary Figure 3: Average one-unit differences
+We estimate the relative decrease in climate action as one increasingly agrees with techno-optimism.
+
+```{r}
+all_models <- run_all_models(dat_final, predictor = 'techno_optimism', filename_ext = '')
+df_effects <- estimate_effects(
+  all_models, filename = 'results/effects_unit.csv',
+  predictor = 'techno_optimism',
+  type = 'avg_comparisons'
+)
+
+df_effects$behavior <- unlist(behaviors[df_effects$behavior])
+df_effects <- order_effects(df_effects, type = 'raw') %>% 
+  mutate(
+    class = factor(class, rev(c('adjusted', 'unadjusted')))
+  )
+```
+
+We estimate the average (adjusted) one-unit difference for civic actions (3.2\%) and lifestyle changes (3\%).
+
+```{r}
+df_effects %>% 
+  group_by(class, category) %>% 
+  summarize(
+    mean_estimate = mean(estimate)
+  )
+```
+
+```{r}
+cols <- c('#D95F02', '#1B9E77')
+pS2 <- ggplot(df_effects, aes(x = behavior, y = estimate, color = category, alpha = class)) +
+  coord_flip() +
+  geom_errorbar(
+    aes(ymin = ci_lo, ymax = ci_hi), position = position_dodge(width = 0.75),
+    width = 0.75, linewidth = 1,
+    show.legend = TRUE
+  ) +
+  geom_point(
+    aes(x = behavior, y = estimate), position = position_dodge(width = 0.75),
+    size = 3, show.legend = TRUE
+  ) +
+  xlab('') +
+  scale_y_continuous(
+    limits = c(-0.12, 0.02), breaks = seq(-0.12, 0.02, 0.02),
+    labels = label_percent(scale = 100)
+  ) +
+  ggtitle('Percentage decrease in climate action for one unit \n increase in techno-optimism') +
+  ylab('Percentage decrease') +
+  theme_minimal() +
+  theme(legend.position = 'top') +
+  theme_minimal() +
+  scale_color_manual(
+    values = cols
+  ) +
+  scale_alpha_manual(
+    values = c(0.50, 1),
+    labels = rev(c('Adjusted for background variables', 'Not adjusted'))
+  ) +
+  theme(
+    legend.position = 'top',
+    legend.title = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_blank(),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    axis.text.x = element_text(size = 10),
+    axis.text.y = element_text(size = 10),
+    plot.title = element_text(hjust = .5, size = 14),
+    strip.text.x = element_text(size = 9, face = 'bold')
+  ) + guides(
+    alpha = guide_legend(reverse = FALSE, nrow = 1),
+    color = FALSE
+  )
+
+pS2
+ggsave('figures/FigureS3.pdf', pS2, width = 9, height = 10)
+```
+
+# Session info
+```{r}
+sessionInfo()
+```
