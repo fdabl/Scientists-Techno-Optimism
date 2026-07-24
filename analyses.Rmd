@@ -777,7 +777,7 @@ df_effects_mult <- estimate_effects(
 
 all_models_worry <- run_all_models(
   dat_final, predictor = 'techno_optimism',
-  filename_ext = '_worry_fact', worry = TRUE, force = FALSE
+  filename_ext = '_worry', worry = TRUE, force = FALSE
 )
 
 df_effects_worry_mult <- estimate_effects(
