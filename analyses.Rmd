@@ -1,5 +1,5 @@
 ---
-title: "Techno-Optimism Analyses"
+title: "Data analysis: Techno-optimistic scientists take fewer climate actions"
 author: Fabian Dablander
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 header-includes:
@@ -27,7 +27,7 @@ knitr::opts_chunk$set(
 
 
 # Setup
-This document runs the statistical analyses reported in the paper Dablander, F., Cologna, V., Sachisthal, M.S.M., & Haslbeck, J.M.B. (2025). Techno-optimistic scientists take fewer climate actions.
+This document runs the statistical analyses reported in the paper Dablander, F., Cologna, V., Sachisthal, M.S.M., & Haslbeck, J.M.B. (2026). Techno-optimistic scientists take fewer climate actions.
 
 ```{r}
 library(brms)
@@ -453,6 +453,7 @@ df_effects <- estimate_effects(
   predictor = 'techno_optimism',
   force = FALSE
 )
+
 df_effects$behavior <- unlist(behaviors[df_effects$behavior])
 df_effects <- order_effects(df_effects) %>% filter(class == 'adjusted')
 ```
@@ -686,7 +687,6 @@ fit <- run_model(
   cores = 4, chains = 4, family = cumulative('probit'), iter = 2000, warmup = 500
 )
 
-
 if (!file.exists('results/worry_pred.RDS')) {
   dat_worry_pred <- avg_predictions(fit, variables = 'worry')
   saveRDS(dat_worry_pred, 'results/worry_pred.RDS')
@@ -709,7 +709,6 @@ df_worry_combined <- df_draws %>%
     ci_hi = quantile(draw, 0.975),
     .groups = 'drop'
   )
-
 
 if (!file.exists('results/informed_pred.RDS')) {
   dat_informed_pred <- avg_predictions(fit, variables = 'informed')
@@ -765,7 +764,7 @@ ggsave('figures/FigureS1.pdf', pworry, width = 8, height = 6)
 ```
 
 ## Supplementary Figure 2: Relative differences
-We estimate the relative decrease in climate action by techno-optimistic scientists compared to non-techno-optimistic scientists.
+We estimate the relative decrease in climate action by techno-optimistic scientists compared to non-techno-optimistic scientists. We did not adjust for worry in the main analysis because it may well be a mediator. We adjust for worry below as a robustness check (in addition to adjusting for all the other background variables).
 
 ```{r}
 all_models <- run_all_models(dat_final, predictor = 'techno_optimism', filename_ext = '')
@@ -776,6 +775,21 @@ df_effects_mult <- estimate_effects(
   force = FALSE, comp = 'multiplicative'
 )
 
+all_models_worry <- run_all_models(
+  dat_final, predictor = 'techno_optimism',
+  filename_ext = '_worry_fact', worry = TRUE, force = FALSE
+)
+
+df_effects_worry_mult <- estimate_effects(
+  all_models_worry, filename = 'results/effects_relative_worry.csv',
+  predictor = 'techno_optimism',
+  force = FALSE, comp = 'multiplicative'
+) %>%
+  filter(class == 'adjusted') %>% 
+  mutate(class = 'worry')
+
+df_effects_mult <- bind_rows(df_effects_mult, df_effects_worry_mult)
+
 df_effects_mult$estimate <- 1 / df_effects_mult$estimate
 df_effects_mult$ci_lo <- 1 / df_effects_mult$ci_lo
 df_effects_mult$ci_hi <- 1 / df_effects_mult$ci_hi
@@ -783,11 +797,13 @@ df_effects_mult$ci_hi <- 1 / df_effects_mult$ci_hi
 df_effects_mult$behavior <- unlist(behaviors[df_effects_mult$behavior])
 df_effects_mult <- order_effects(df_effects_mult, type = 'multiplicative') %>% 
   mutate(
-    class = factor(class, rev(c('adjusted', 'unadjusted')))
+    class = factor(class, levels = c('unadjusted', 'adjusted', 'worry'))
   )
 ```
 
 The average (adjusted) relative decrease for techno-optimistic scientists is 28\% for civic actions and 20\% for lifestyle changes. The other way around, this corresponds to a average (adjusted) relative increase for non-techno-optimistic scientists for civic actions of 41\% and lifestyle changes of 26\%.
+
+Additionally adjusting for worry yields an average relative decrease for techno-optimistic scientists of 24\% for civic actions and 17\% for lifestyle changes. The other way around, this corresponds to an average relative increase for non-techno-optimistic scientists for civic actions of 33\% and lifestyle changes of 22\%.
 
 ```{r}
 df_effects_mult %>% 
@@ -799,16 +815,19 @@ df_effects_mult %>%
 
 ```{r}
 cols <- c('#D95F02', '#1B9E77')
-pS1 <- ggplot(
+
+pS2 <- ggplot(
   df_effects_mult,
-  aes(x = behavior, y = estimate, color = category, alpha = class)) +
+  aes(x = behavior, y = estimate, color = category, shape = class, alpha = class)) +
   geom_errorbar(
-    aes(ymin = ci_lo, ymax = ci_hi), position = position_dodge(width = 0.75),
-    width = 0.75, linewidth = 1,
-    show.legend = TRUE
+    aes(ymin = ci_lo, ymax = ci_hi),
+    width = 0.90, linewidth = 1,
+    show.legend = TRUE,
+    position = position_dodge(width = 0.80)
   ) +
   geom_point(
-    aes(x = behavior, y = estimate), position = position_dodge(width = 0.75),
+    aes(x = behavior, y = estimate),# position = position_dodge(width = 0.75),
+    position = position_dodge(width = 0.80),
     size = 3, show.legend = TRUE
   ) +
   theme_minimal() +
@@ -818,9 +837,22 @@ pS1 <- ggplot(
   ggtitle('Relative engagement in climate action for \n techno-optimistics vs non-techno-optimistics') +
   scale_x_discrete(guide = guide_axis(angle = 0)) +
   scale_color_manual(values = cols) +
+  scale_shape_manual(
+    values = c('triangle', 'circle', 'square'),
+    labels = rev(c(
+      'Adjusted for background variable + worry',
+      'Adjusted for background variables',
+      'Not adjusted'
+    ))
+  ) +
   scale_alpha_manual(
-    values = c(0.50, 1),
-    labels = rev(c('Adjusted for background variables', 'Not adjusted'))
+    name = NULL,
+    values = c(0.25, 1, 0.50),
+    labels = rev(c(
+      'Adjusted for background variable + worry',
+      'Adjusted for background variables',
+      'Not adjusted'
+    ))
   ) +
   scale_y_continuous(
     limits = c(0.20, 1.1),
@@ -831,6 +863,8 @@ pS1 <- ggplot(
   theme(
     legend.position = 'top',
     legend.title = element_blank(),
+    legend.key.height = unit(0.25, "cm"),
+    legend.spacing.y = unit(0, "pt"),
     panel.grid.minor = element_blank(),
     panel.grid.major.y = element_blank(),
     axis.title.x = element_text(size = 12),
@@ -838,11 +872,15 @@ pS1 <- ggplot(
     axis.text.x = element_text(size = 10),
     axis.text.y = element_text(size = 10),
     plot.title = element_text(hjust = .5, size = 14),
-    strip.text.x = element_text(size = 9, face = 'bold')
-  ) + guides(fill = guide_legend(reverse = TRUE, ncol = 1), color = FALSE)
+    strip.text.x = element_text(size = 9, face = 'bold'),
+  ) + guides(
+    shape = guide_legend(
+      reverse = TRUE, ncol = 1, override.aes = list(alpha = c(0.50, 1, 0.25))
+    ), color = FALSE, alpha = FALSE
+  )
 
-pS1
-ggsave('figures/FigureS2.pdf', pS1, width = 8, height = 10)
+pS2
+ggsave('figures/FigureS2.pdf', pS2, width = 8, height = 10)
 ```
 
 ## Supplementary Figure 3: Average one-unit differences
@@ -875,7 +913,7 @@ df_effects %>%
 
 ```{r}
 cols <- c('#D95F02', '#1B9E77')
-pS2 <- ggplot(df_effects, aes(x = behavior, y = estimate, color = category, alpha = class)) +
+pS3 <- ggplot(df_effects, aes(x = behavior, y = estimate, color = category, alpha = class)) +
   coord_flip() +
   geom_errorbar(
     aes(ymin = ci_lo, ymax = ci_hi), position = position_dodge(width = 0.75),
@@ -919,8 +957,204 @@ pS2 <- ggplot(df_effects, aes(x = behavior, y = estimate, color = category, alph
     color = FALSE
   )
 
-pS2
-ggsave('figures/FigureS3.pdf', pS2, width = 9, height = 10)
+pS3
+ggsave('figures/FigureS3.pdf', pS3, width = 9, height = 10)
+```
+
+## Supplementary Figure 4: Sensitivity analysis for unobserved confounding
+Here we assess how the strength of potential unobserved confounding attenuates the estimated causal effects of techno-optimism on the various climate actions. Please see the main text of the paper for details.
+
+```{r, fig.width = 9, fig.height = 7}
+all_linear_models <- run_all_models(
+  dat_final, predictor = 'techno_optimism',
+  filename_ext = '_linear', force = FALSE,
+  sensitivity = TRUE, family = 'gaussian'
+)
+
+dat_final$techno_optimism_num <- as.numeric(dat_final$techno_optimism)
+
+# The effect of a 1-SD increase in political orientation on techno-optimism is 0.30
+fit_techno <- run_model(
+  form = techno_optimism_num ~ research_fact + Age_std + Political_std + informed +
+    position + field + continent + is_tenured + is_female + is_gender_other,
+  dat = dat_final, family = 'gaussian', filename = 'models/techno_optimism_linear.RDS', force = FALSE
+)
+
+# Get the residual variance (posterior mode)
+sd_resid_x <- mean(resid(fit_techno)[, 2])
+
+df_effects_sens <- estimate_effects(
+  all_linear_models, filename = 'results/effects_sensitivity.csv',
+  predictor = 'techno_optimism',
+  force = FALSE, sensitivity = TRUE
+) %>% 
+  group_by(behavior) %>% 
+  summarize(tau_obs = estimate[combined == 'Disagree'] - estimate[combined == 'Agree'])
+
+#-----------------------------
+# Interpretation of b1 and b2:
+# b1 = effect of a 1-SD increase in omitted confounder on techno-optimism,
+#      conditional on observed covariates, measured in techno-optimism units
+#
+# b2 = effect of a 1-SD increase in omitted confounder on climate action,
+#      conditional on techno-optimism and observed covariates,
+#      measured in probability units
+#-----------------------------
+
+b1_benchmark <- 0.30
+var_resid_x  <- sd_resid_x^2  # from the techno-optimism model above (fit_techno)
+
+sel <- seq(0, 2.25, by = 0.005)
+
+sens_grid <- expand_grid(
+  frac_techno = sel,
+  frac_climate = sel
+) %>%
+  mutate(
+    prop_reduction = (frac_techno * b1_benchmark * frac_climate) / var_resid_x,
+    prop_remaining = 1 - prop_reduction
+  )
+
+reduction_curves <- expand_grid(
+  reduction = c(0.25, 0.50, 0.75, 1.00),
+  frac_techno = sel
+) %>%
+  mutate(
+    frac_climate = reduction * var_resid_x / (frac_techno * b1_benchmark),
+    reduction_label = paste0(reduction * 100, "% lower")
+  ) %>% 
+  filter(frac_climate <= max(sel))
+
+label_x_targets <- tibble(
+  reduction_label = c("25% lower", "50% lower", "75% lower", "100% lower"),
+  x_target = c(0.95, 1.30, 1.55, 1.78)
+)
+
+# Curves for 25%, 50%, 75%, and 100% reduction
+reduction_levels <- c(0.25, 0.50, 0.75, 1.00)
+
+label_points <- tibble(
+  reduction = reduction_levels,
+  reduction_label = factor(
+    reduction,
+    levels = c(0.25, 0.50, 0.75, 1.00),
+    labels = c("25% lower", "50% lower", "75% lower", "100% lower")
+  )
+) %>%
+  mutate(
+    frac_techno = sqrt(reduction * var_resid_x / b1_benchmark),
+    frac_climate = frac_techno
+  ) %>%
+  filter(
+    frac_techno >= min(sel), frac_techno <= max(sel),
+    frac_climate >= min(sel), frac_climate <= max(sel)
+  )
+
+fill_limits <- c(0, 1)
+
+pS4 <- ggplot(
+  sens_grid,
+  aes(x = frac_techno, y = frac_climate, fill = prop_reduction)
+) +
+  geom_raster() +
+  geom_contour(
+    aes(z = prop_reduction),
+    breaks = 0,
+    color = "black",
+    linewidth = 0.8
+  ) +
+  geom_line(
+    data = reduction_curves,
+    aes(
+      x = frac_techno,
+      y = frac_climate,
+      linetype = reduction_label,
+      color = reduction_label
+    ),
+    inherit.aes = FALSE,
+    linewidth = 0.9,
+    show.legend = FALSE
+  ) +
+  geom_text(
+    data = label_points,
+    aes(
+      x = frac_techno,
+      y = frac_climate,
+      label = reduction_label
+    ),
+    inherit.aes = FALSE,
+    size = 4,
+    color = "black",
+    hjust = -0.20,
+    vjust = -0.40
+  ) +
+  scale_linetype_manual(
+    values = c(
+      "25% lower"  = "dotted",
+      "50% lower"  = "dotdash",
+      "75% lower"  = "dashed",
+      "100% lower" = "solid"
+    )
+  ) +
+  scale_color_manual(
+    values = c(
+      "25% lower"  = "black",
+      "50% lower"  = "black",
+      "75% lower"  = "black",
+      "100% lower" = "black"
+    )
+  ) +
+  scale_fill_gradientn(
+    colours = rev(c(
+      "#C73030",  # 0% remaining = fully explained away / red
+      "#E06B5C",
+      "#F2B8AE",
+      "#FFFFFF",  # 50% remaining = 50% lower / white
+      "#D5ECF7",
+      "#9DCEEA",
+      "#347FBD"   # 100% remaining = unchanged / blue
+    )),
+    values = scales::rescale(
+      c(0, 0.20, 0.40, 0.50, 0.65, 0.80, 1.00),
+      from = fill_limits
+    ),
+    limits = fill_limits,
+    oob = scales::squish,
+    breaks = c(0, 0.25, 0.50, 0.75, 1),
+    labels = percent_format(accuracy = 1),
+    name = "Percentage\nreduction"
+  ) +
+  labs(
+    x = expression(atop("Confounder" %->% "techno-optimism",
+                        "relative to effect of political orientation " * (f[1]))),
+    y = expression(atop("Confounder" %->% "climate action",
+                        "relative to observed causal effect " * (f[2]))),
+    title = "Sensitivity of the observed causal effect to unobserved confounding"
+  ) +
+  coord_cartesian(clip = "off") +
+  scale_x_continuous(
+    expand = c(0, 0),
+    breaks = c(seq(0, max(sel), by = 0.25)),
+    labels = percent_format(accuracy = 1)
+  ) +
+  scale_y_continuous(
+    expand = c(0, 0),
+    breaks = c(seq(0, max(sel), by = 0.25)),
+    labels = percent_format(accuracy = 1)
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.title = element_text(margin = margin(b = 12)),
+    axis.title = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.text.x = element_text(size = 12),
+    plot.title = element_text(size = 16, hjust = 0.50, margin = margin(b = 16))
+  )
+
+pS4
+ggsave('Figures/FigureS4.pdf', pS4, height = 7, width = 9)
 ```
 
 # Session info

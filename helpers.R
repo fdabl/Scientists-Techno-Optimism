@@ -19,7 +19,7 @@ run_model <- function(form, filename, dat, force = FALSE, use_model = NULL, refr
 
 run_all_models <- function(
     dat_final, predictor = 'techno_optimism', filename_ext = '',
-    cores = 10, force = FALSE
+    cores = 10, force = FALSE, family = 'bernoulli', sensitivity = FALSE, worry = FALSE
   ) {
   registerDoParallel(cores = cores)
   
@@ -48,12 +48,14 @@ run_all_models <- function(
     'talk_climate', predictor = predictor,
     random_intercept = FALSE, random_slope = FALSE,
     marginal = TRUE, worry = FALSE, informed = FALSE,
+    sensitivity = sensitivity, control_only = TRUE
   )
   
   form_adj <- make_form(
     'talk_climate', predictor = predictor,
     random_intercept = FALSE, random_slope = FALSE,
-    marginal = FALSE, worry = FALSE, informed = TRUE
+    marginal = FALSE, worry = worry, informed = TRUE,
+    sensitivity = sensitivity, control_only = FALSE
   )
   
   filename <- paste0('models/marginal_talk_climate', filename_ext, '.RDS')
@@ -62,12 +64,12 @@ run_all_models <- function(
   # Run one initial model so below we don't need to recompile them, but can use this one
   fit_init_marginal <- run_model(
     form, filename, dat_final, use_model = NULL,
-    cores = 4, chains = 4, family = bernoulli, force = force, iter = 2000, warmup = 500
+    cores = 4, chains = 4, family = family, force = force, iter = 2000, warmup = 500
   )
   
   fit_init_adj <- run_model(
     form_adj, filename_adj, dat_final, use_model = NULL,
-    cores = 4, chains = 4, family = bernoulli, force = force, iter = 2000, warmup = 500
+    cores = 4, chains = 4, family = family, force = force, iter = 2000, warmup = 500
   )
   
   # Condition on nothing
@@ -78,12 +80,13 @@ run_all_models <- function(
     form <- make_form(
       b, predictor = predictor,
       random_intercept = FALSE, random_slope = FALSE,
-      marginal = TRUE, worry = FALSE, informed = FALSE
+      marginal = TRUE, worry = FALSE, informed = FALSE,
+      sensitivity = sensitivity, control_only = TRUE
     )
     
     fit <- run_model(
       form, filename, dat_final, use_model = fit_init_marginal,
-      cores = 1, chains = 4, family = bernoulli, force = force, iter = 2000, warmup = 500
+      cores = 1, chains = 4, family = family, force = force, iter = 2000, warmup = 500
     )
     
     print(b)
@@ -100,12 +103,113 @@ run_all_models <- function(
     form <- make_form(
       b, predictor = predictor,
       random_intercept = FALSE, random_slope = FALSE,
-      marginal = FALSE, worry = FALSE, informed = TRUE
+      marginal = FALSE, worry = worry, informed = TRUE,
+      sensitivity = sensitivity, control_only = FALSE
     )
     
     fit <- run_model(
       form, filename, dat_final, use_model = fit_init_adj,
-      cores = 1, chains = 4, family = bernoulli, force = force, iter = 2000, warmup = 500
+      cores = 1, chains = 4, family = family, force = force, iter = 2000, warmup = 500
+    )
+    
+    res <- list()
+    res[[b]] <- fit
+    res
+  }
+  
+  list(
+    'fit_all_marginal' = fit_all_marginal,
+    'fit_all_adj' = fit_all_adj
+  )
+}
+
+run_techno_optimsm_predictions <- function(
+    dat_final, predictor = 'techno_optimism', filename_ext = '',
+    cores = 10, force = FALSE, family = 'bernoulli', sensitivity = FALSE) {
+  
+  registerDoParallel(cores = cores)
+  
+  behaviors <- list(
+    # Civic behaviors
+    'talk_climate' = 'Talked about climate with others',
+    'donate_money' = 'Donated to climate organizations',
+    'signed_petitions' = 'Signed petitions',
+    'advocated_change' = 'Advocated change within institution',
+    'engaged_policymakers' = 'Engaged with politicians',
+    'engaged_disobedience' = 'Engaged in civil disobedience',
+    'engaged_protest' = 'Engaged in protest',
+    'engaged_advocacy' = 'Engaged in advocacy',
+    'wrote_letters' = 'Wrote letters to politicians',
+    
+    # Lifestyle behaviors
+    'reduced_flying' = 'Reduced flying',
+    'reduced_car' = 'Reduced car usage',
+    'electric_vehicle' = 'Switched to electric vehicle',
+    'energy_home' = 'Switched to renewable energy at home',
+    'veggie_diet' = 'Follows a mostly vegetarian or vegan diet',
+    'fewer_children' = 'Decided to have fewer or no children'
+  )
+  
+  form <- make_form(
+    'techno_optimism', predictor = '',
+    random_intercept = FALSE, random_slope = FALSE,
+    marginal = FALSE, worry = FALSE, informed = FALSE,
+    sensitivity = FALSE, control_only = FALSE
+  )
+  
+  
+  filename <- paste0('models/marginal_talk_climate', filename_ext, '.RDS')
+  filename_adj <- paste0('models/adjusted_talk_climate', filename_ext, '.RDS')
+  
+  # Run one initial model so below we don't need to recompile them, but can use this one
+  fit_init_marginal <- run_model(
+    form, filename, dat_final, use_model = NULL,
+    cores = 4, chains = 4, family = family, force = force, iter = 2000, warmup = 500
+  )
+  
+  fit_init_adj <- run_model(
+    form_adj, filename_adj, dat_final, use_model = NULL,
+    cores = 4, chains = 4, family = family, force = force, iter = 2000, warmup = 500
+  )
+  
+  # Condition on nothing
+  fit_all_marginal <- foreach(i = seq(length(behaviors))) %dopar% {
+    b <- names(behaviors)[i]
+    
+    filename <- paste0('models/marginal_', b, filename_ext, '.RDS')
+    form <- make_form(
+      b, predictor = predictor,
+      random_intercept = FALSE, random_slope = FALSE,
+      marginal = TRUE, worry = FALSE, informed = FALSE,
+      sensitivity = sensitivity, control_only = TRUE
+    )
+    
+    fit <- run_model(
+      form, filename, dat_final, use_model = fit_init_marginal,
+      cores = 1, chains = 4, family = family, force = force, iter = 2000, warmup = 500
+    )
+    
+    print(b)
+    res <- list()
+    res[[b]] <- fit
+    res
+  }
+  
+  # Condition only on background variables
+  fit_all_adj <- foreach(i = seq(length(behaviors))) %dopar% {
+    b <- names(behaviors)[i]
+    
+    filename <- paste0('models/adjusted_', b, filename_ext, '.RDS')
+    form <- make_form(
+      b, predictor = predictor,
+      random_intercept = FALSE, random_slope = FALSE,
+      marginal = FALSE, worry = FALSE, informed = TRUE,
+      sensitivity = sensitivity, control_only = FALSE
+    )
+    
+    fit <- run_model(
+      form, filename, dat_final, use_model = fit_init_adj,
+      cores = 1, chains = 4, family = family, force = force, iter = 2000, warmup = 500
     )
     
     res <- list()
@@ -124,7 +228,8 @@ estimate_effects <- function(
     predictor = 'techno_optimism',
     type = 'avg_predictions',
     force = FALSE,
-    comp = 'difference'
+    comp = 'difference',
+    sensitivity = FALSE
 ) {
   behaviors <- list(
     # Civic behaviors
@@ -156,12 +261,14 @@ estimate_effects <- function(
     fit_all_marginal <- all_models[['fit_all_marginal']]
     fit_all_adj <- all_models[['fit_all_adj']]
     
-    df_marginal <- do.call('rbind', lapply(seq(15), function(i) {
-      fit <- fit_all_marginal[[i]]
-      behavior <- names(fit)
-      
-      get_effects_proper(fit[[1]], behavior, variable = 'techno_optimism', type = type, comp = comp)
-    }))
+    if (!sensitivity) {
+      df_marginal <- do.call('rbind', lapply(seq(15), function(i) {
+        fit <- fit_all_marginal[[i]]
+        behavior <- names(fit)
+        
+        get_effects_proper(fit[[1]], behavior, variable = 'techno_optimism', type = type, comp = comp)
+      }))
+    }
     
     df_adj <- do.call('rbind', lapply(seq(15), function(i) {
       fit <- fit_all_adj[[i]]
@@ -170,10 +277,15 @@ estimate_effects <- function(
       get_effects_proper(fit[[1]], behavior, variable = 'techno_optimism', type = type, comp = comp)
     }))
     
-    df_effects <- bind_rows(
-      df_marginal %>% mutate(class = 'unadjusted'),
-      df_adj %>% mutate(class = 'adjusted')
-    )
+    if (sensitivity) {
+      df_effects <- df_adj %>% mutate(class = 'sensitivity')
+      
+    } else {
+      df_effects <- bind_rows(
+        df_marginal %>% mutate(class = 'unadjusted'),
+        df_adj %>% mutate(class = 'adjusted')
+      )
+    }
     
     write.csv(df_effects, filename, row.names = FALSE)
     
@@ -258,14 +370,23 @@ add_behavior_categories <- function(df, categories) {
 make_form <- function(
     outcome, predictor = 'techno_optimism_trin', random_intercept = TRUE,
     random_slope = TRUE, binarize = TRUE, marginal = FALSE,
-    worry = FALSE, informed = FALSE
+    worry = FALSE, informed = FALSE, sensitivity = FALSE, control_only = FALSE
 ) {
 
   if (marginal) {
     pred <- predictor
   } else {
     pred <- paste0(
-      predictor, ifelse(worry, ' + Worry_std', ''), ifelse(informed, ' + informed', ''),
+      predictor, ifelse(worry, ' + worry', ''), ifelse(informed, ' + informed', ''),
+      ' + research_fact + Age_std + political + position + field + continent + is_tenured + is_female + is_gender_other'
+    )
+  }
+  
+  # Hack to do the sensitivity analysis for omitted confounding
+  if (sensitivity) {
+    pred <- paste0(
+      ifelse(control_only, '', predictor),
+      ifelse(worry, ' + Worry_std', ''), ifelse(informed, ' + informed', ''),
       ' + research_fact + Age_std + political + position + field + continent + is_tenured + is_female + is_gender_other'
     )
   }
@@ -279,7 +400,6 @@ make_form <- function(
 
   as.formula(paste0(outcome, ' ~ ', pred))
 }
-
 
 # Get average comparisons from fitted model
 get_effects <- function(
