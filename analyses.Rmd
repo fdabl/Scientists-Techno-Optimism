@@ -195,6 +195,11 @@ behaviors <- list(
   'engaged_advocacy' = 'Engaged in advocacy',
   'wrote_letters' = 'Wrote letters to politicians',
   
+  
+  # Professional behaviors (analysed separately below)
+  'shifted_research' = 'Shifted research to climate change',
+  'included_teaching' = 'Included climate change in teaching',
+  
   # Lifestyle behaviors
   'reduced_flying' = 'Reduced flying',
   'reduced_car' = 'Reduced car usage',
@@ -206,7 +211,7 @@ behaviors <- list(
 
 behavior_map <- list(
   'Civic action' = unlist(behaviors[seq(9)]),
-  'Lifestyle change' = unlist(behaviors[seq(10, 15)])
+  'Lifestyle change' = unlist(behaviors[seq(12, 17)])
 )
 behavior_names_map <- unlist(behaviors)
 ```
@@ -523,6 +528,30 @@ p <- ggplot(
 
 p
 ggsave('figures/Figure3.pdf', p, width = 8, height = 10)
+```
+
+Here are the (adjusted) differences for the two professional behaviors.
+
+```{r}
+teaching_form <- as.formula(paste0(
+  'included_teaching ~ ',
+  'techno_optimism + informed + research_fact + Age_std + ',
+  'political + position + field + continent + is_tenured + ',
+  'is_female + is_gender_other'
+))
+
+research_form <- as.formula(paste0(
+  'shifted_research ~ ',
+  'techno_optimism + informed + research_fact + Age_std + ',
+  'political + position + field + continent + is_tenured + ',
+  'is_female + is_gender_other'
+))
+
+fit_teaching <- run_model(teaching_form, 'models/adjusted_included_teaching.RDS', use_model = NULL)
+fit_research <- run_model(research_form, 'models/adjusted_shifted_research.RDS', use_model = NULL)
+
+get_effects_proper(fit_teaching, 'included_teaching')
+get_effects_proper(fit_research, 'shifted_research')
 ```
 
 # Supplementary analyses

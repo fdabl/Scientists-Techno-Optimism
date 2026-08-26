@@ -1,5 +1,5 @@
 # Scientists' Techno-Optimism and Climate Action
-This repository contains code to reproduce all analyses and figures for the paper Dablander, F., Cologna, V., Sachisthal, M.S.M., & Haslbeck, J.M.B. (2025). Techno-optimistic scientists take fewer climate actions.
+This repository contains code to reproduce all analyses and figures for the paper Dablander, F., Cologna, V., Sachisthal, M.S.M., & Haslbeck, J.M.B. ([2026](https://osf.io/preprints/psyarxiv/c3skb_v3)). Techno-optimistic scientists take fewer climate actions.
 
 - `helpers.R` includes useful functions.
 - `analyses.Rmd` runs the analyses reported in the paper.

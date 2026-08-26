@@ -75,6 +75,7 @@ run_all_models <- function(
   # Condition on nothing
   fit_all_marginal <- foreach(i = seq(length(behaviors))) %dopar% {
     b <- names(behaviors)[i]
+    print(b)
     
     filename <- paste0('models/marginal_', b, filename_ext, '.RDS')
     form <- make_form(
@@ -262,7 +263,7 @@ estimate_effects <- function(
     fit_all_adj <- all_models[['fit_all_adj']]
     
     if (!sensitivity) {
-      df_marginal <- do.call('rbind', lapply(seq(15), function(i) {
+      df_marginal <- do.call('rbind', lapply(seq(length(behaviors)), function(i) {
         fit <- fit_all_marginal[[i]]
         behavior <- names(fit)
         
@@ -270,7 +271,7 @@ estimate_effects <- function(
       }))
     }
     
-    df_adj <- do.call('rbind', lapply(seq(15), function(i) {
+    df_adj <- do.call('rbind', lapply(seq(length(behaviors)), function(i) {
       fit <- fit_all_adj[[i]]
       behavior <- names(fit)
       
@@ -399,28 +400,6 @@ make_form <- function(
   }
 
   as.formula(paste0(outcome, ' ~ ', pred))
-}
-
-# Get average comparisons from fitted model
-get_effects <- function(
-    fit, behavior, type, predictor = 'techno_optimism_trin',
-    metric = 'absolute', conf_level = 0.95, ...
-  ) {
-  
-  fn <- ifelse(type == 'avg_predictions', avg_predictions, avg_comparisons)
-  df <- data.frame(fn(fit, variable = predictor, conf_level = conf_level, ...))
-
-  df <- df %>%
-    rename(
-      ci_lo = conf.low,
-      ci_hi = conf.high
-    ) %>%
-    mutate(
-      behavior = behavior,
-      type = type
-    )
-
-  df
 }
 
 
